@@ -1,0 +1,666 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VisionTrack AI | NextGen Weighbridge</title>
+    <meta name="description"
+        content="AI-powered autonomous weighbridge system with real-time vehicle detection, license plate recognition and scale reading.">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <link
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;700&family=Outfit:wght@400;500;600;700;800&display=swap"
+        rel="stylesheet">
+
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    fontFamily: { sans: ['Inter', 'sans-serif'], mono: ['JetBrains Mono', 'monospace'], display: ['Outfit', 'sans-serif'] },
+                    colors: {
+                        navy: { 950: '#030914', 900: '#081226', 800: '#0f1c3a', 700: '#1b2c56' },
+                        cyber: { blue: '#00f0ff', green: '#00ff66', amber: '#ffb300', red: '#ff003c' }
+                    },
+                    animation: { 'blob': 'blob 10s infinite', 'scanline': 'scanline 3s linear infinite', 'pulse-glow': 'pulse-glow 2s cubic-bezier(0.4,0,0.6,1) infinite' },
+                    keyframes: {
+                        blob: { '0%': { transform: 'translate(0,0) scale(1)' }, '33%': { transform: 'translate(30px,-50px) scale(1.1)' }, '66%': { transform: 'translate(-20px,20px) scale(0.9)' }, '100%': { transform: 'translate(0,0) scale(1)' } },
+                        scanline: { '0%': { transform: 'translateY(-100%)' }, '100%': { transform: 'translateY(100vh)' } },
+                        'pulse-glow': { '0%,100%': { opacity: 1, filter: 'brightness(1)' }, '50%': { opacity: .8, filter: 'brightness(1.5)' } }
+                    }
+                }
+            }
+        }
+    </script>
+
+    <style>
+        body {
+            background-color: #030914;
+            color: #e2e8f0;
+            overflow-x: hidden;
+        }
+
+        .bg-mesh {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-image: radial-gradient(at 0% 0%, rgba(0, 240, 255, .08) 0px, transparent 50%), radial-gradient(at 100% 0%, rgba(0, 255, 102, .05) 0px, transparent 50%), radial-gradient(at 100% 100%, rgba(0, 240, 255, .05) 0px, transparent 50%);
+            z-index: -2;
+        }
+
+        .grid-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-size: 40px 40px;
+            background-image: linear-gradient(to right, rgba(255, 255, 255, .02) 1px, transparent 1px), linear-gradient(to bottom, rgba(255, 255, 255, .02) 1px, transparent 1px);
+            z-index: -1;
+            pointer-events: none;
+        }
+
+        .glass-panel {
+            background: rgba(8, 18, 38, .6);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 1px solid rgba(255, 255, 255, .06);
+            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, .3);
+            border-radius: 1.25rem;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .glass-panel::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 1px;
+            background: linear-gradient(90deg, transparent, rgba(255, 255, 255, .1), transparent);
+        }
+
+        .video-container {
+            position: relative;
+            background: #000;
+            border-radius: .75rem;
+            overflow: hidden;
+            box-shadow: inset 0 0 20px rgba(0, 0, 0, .8);
+            border: 1px solid rgba(255, 255, 255, .1);
+            display: flex;
+            align-items: stretch;
+        }
+
+        .cam-overlay {
+            position: absolute;
+            inset: 0;
+            pointer-events: none;
+            box-shadow: inset 0 0 50px rgba(0, 0, 0, .5);
+        }
+
+        .crosshair {
+            position: absolute;
+            width: 20px;
+            height: 20px;
+            border-color: rgba(0, 240, 255, .5);
+            border-style: solid;
+        }
+
+        .ch-tl {
+            top: 10%;
+            left: 10%;
+            border-width: 2px 0 0 2px;
+        }
+
+        .ch-tr {
+            top: 10%;
+            right: 10%;
+            border-width: 2px 2px 0 0;
+        }
+
+        .ch-bl {
+            bottom: 10%;
+            left: 10%;
+            border-width: 0 0 2px 2px;
+        }
+
+        .ch-br {
+            bottom: 10%;
+            right: 10%;
+            border-width: 0 2px 2px 0;
+        }
+
+        .scanning-line {
+            position: absolute;
+            left: 0;
+            right: 0;
+            height: 2px;
+            background: rgba(0, 240, 255, .8);
+            box-shadow: 0 0 10px rgba(0, 240, 255, .8), 0 0 20px rgba(0, 240, 255, .4);
+            animation: scanline 3s linear infinite;
+        }
+
+        .text-glow-blue {
+            text-shadow: 0 0 10px rgba(0, 240, 255, .5);
+        }
+
+        .text-glow-green {
+            text-shadow: 0 0 10px rgba(0, 255, 102, .5);
+        }
+
+        .text-glow-amber {
+            text-shadow: 0 0 10px rgba(255, 179, 0, .5);
+        }
+
+        ::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: rgba(0, 0, 0, .2);
+            border-radius: 4px;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: rgba(255, 255, 255, .1);
+            border-radius: 4px;
+        }
+
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateY(-10px)
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0)
+            }
+        }
+
+        .new-row {
+            animation: slideIn .4s ease-out forwards;
+        }
+
+        /* Camera offline state */
+        .cam-offline {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100%;
+            width: 100%;
+            background: linear-gradient(135deg, #030914 0%, #0f1c3a 100%);
+            color: #334155;
+            font-family: 'JetBrains Mono', monospace;
+            gap: 12px;
+        }
+
+        .cam-offline i {
+            font-size: 2.5rem;
+            color: #1e3a5f;
+        }
+
+        .cam-offline .status-text {
+            font-size: 0.7rem;
+            letter-spacing: .15em;
+            text-transform: uppercase;
+        }
+
+        .cam-offline .conn-indicator {
+            display: flex;
+            gap: 4px;
+            margin-top: 4px;
+        }
+
+        .cam-offline .conn-dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: #1e293b;
+            animation: blink 1.4s ease-in-out infinite;
+        }
+
+        .cam-offline .conn-dot:nth-child(2) {
+            animation-delay: .2s;
+        }
+
+        .cam-offline .conn-dot:nth-child(3) {
+            animation-delay: .4s;
+        }
+
+        @keyframes blink {
+
+            0%,
+            80%,
+            100% {
+                opacity: .3
+            }
+
+            40% {
+                opacity: 1
+            }
+        }
+
+        /* Demo badge */
+        .demo-banner {
+            background: linear-gradient(90deg, rgba(0, 240, 255, .1), rgba(0, 255, 102, .05));
+            border: 1px solid rgba(0, 240, 255, .2);
+            border-radius: .5rem;
+            padding: .4rem 1rem;
+            font-size: .7rem;
+            letter-spacing: .1em;
+            color: #00f0ff;
+            font-family: 'JetBrains Mono', monospace;
+        }
+    </style>
+</head>
+
+<body class="min-h-screen p-4 md:p-6 lg:p-8 font-sans">
+    <div class="bg-mesh"></div>
+    <div class="grid-overlay"></div>
+    <div
+        class="absolute top-0 left-1/4 w-96 h-96 bg-cyber-blue/10 rounded-full mix-blend-screen filter blur-[100px] animate-blob pointer-events-none">
+    </div>
+    <div class="absolute top-1/4 right-1/4 w-96 h-96 bg-cyber-green/5 rounded-full mix-blend-screen filter blur-[100px] animate-blob pointer-events-none"
+        style="animation-delay:2s"></div>
+
+    <div class="max-w-[1600px] mx-auto space-y-6 relative z-10 w-full">
+
+        <!-- Header -->
+        <header class="glass-panel px-6 py-4 flex flex-col md:flex-row justify-between items-center gap-4">
+            <div class="flex items-center gap-4">
+                <div
+                    class="relative w-12 h-12 flex items-center justify-center rounded-xl bg-gradient-to-br from-cyber-blue/20 to-transparent border border-cyber-blue/30 shadow-[0_0_15px_rgba(0,240,255,0.2)]">
+                    <i class="fa-solid fa-microchip text-cyber-blue text-xl"></i>
+                    <div class="absolute top-[-1px] right-[-1px] w-2 h-2 rounded-full bg-cyber-blue animate-pulse-glow">
+                    </div>
+                </div>
+                <div>
+                    <h1
+                        class="text-2xl md:text-3xl font-display font-bold text-white tracking-wide flex items-center gap-2">
+                        VISION<span class="text-cyber-blue font-light">TRACK</span>
+                        <span
+                            class="text-xs bg-cyber-blue/10 text-cyber-blue px-2 py-0.5 rounded border border-cyber-blue/20 ml-2">PRO</span>
+                    </h1>
+                    <p class="text-xs font-mono text-slate-400 tracking-widest uppercase mt-0.5">
+                        <i class="fa-solid fa-satellite-dish mr-1 text-cyber-blue/70"></i> Autonomous Weighbridge Engine
+                    </p>
+                </div>
+            </div>
+            <div class="flex items-center gap-4">
+                <div class="demo-banner"><i class="fa-solid fa-flask-vial mr-2"></i>DEMO MODE</div>
+                <div class="flex flex-col items-end">
+                    <div class="text-xs font-mono text-slate-400">SYSTEM CORE</div>
+                    <div class="flex items-center gap-2 text-sm font-semibold text-cyber-green text-glow-green">
+                        <i class="fa-solid fa-server text-xs"></i> ONLINE &amp; ACTIVE
+                    </div>
+                </div>
+                <div class="h-10 w-[1px] bg-white/10 mx-2"></div>
+                <button
+                    class="w-10 h-10 rounded-full bg-white/5 border border-white/10 flex items-center justify-center text-slate-300 hover:text-white hover:bg-white/10 transition-all">
+                    <i class="fa-solid fa-gear"></i>
+                </button>
+            </div>
+        </header>
+
+        <!-- Main Grid -->
+        <div class="grid grid-cols-1 xl:grid-cols-12 gap-6">
+
+            <!-- Left: Camera Feeds -->
+            <div class="xl:col-span-8 flex flex-col gap-6">
+                <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 h-full">
+
+                    <!-- Cam 1 -->
+                    <div class="lg:col-span-2 glass-panel p-1 flex flex-col">
+                        <div class="px-4 py-3 flex justify-between items-center bg-navy-900/50 border-b border-white/5">
+                            <h2
+                                class="font-display font-semibold text-sm text-slate-200 uppercase tracking-widest flex items-center gap-2">
+                                <i class="fa-solid fa-camera-retro text-cyber-blue"></i>
+                                Cam 01 <span class="text-slate-500 font-mono text-[10px] normal-case">/FRONT_ALPR</span>
+                            </h2>
+                            <span id="cam1-badge"
+                                class="flex items-center gap-1.5 text-[10px] font-bold font-mono px-2 py-1 rounded bg-slate-800/80 text-slate-400 border border-slate-700">
+                                <span class="w-1.5 h-1.5 rounded-full bg-slate-500"></span> CONNECTING
+                            </span>
+                        </div>
+                        <div id="cam1-container" class="video-container flex-1 min-h-[300px] lg:min-h-[400px]">
+                            <!-- In production this would be /video/cam1 MJPEG stream -->
+                            <div class="cam-offline">
+                                <i class="fa-solid fa-circle-nodes"></i>
+                                <div class="status-text">Cam 01 · Awaiting Edge Server</div>
+                                <div style="font-size:.6rem;color:#1e3a5f">Connect live camera to activate stream</div>
+                                <div class="conn-indicator">
+                                    <div class="conn-dot"></div>
+                                    <div class="conn-dot"></div>
+                                    <div class="conn-dot"></div>
+                                </div>
+                            </div>
+                            <div class="cam-overlay">
+                                <div class="crosshair ch-tl"></div>
+                                <div class="crosshair ch-tr"></div>
+                                <div class="crosshair ch-bl"></div>
+                                <div class="crosshair ch-br"></div>
+                                <div class="scanning-line" style="top:0"></div>
+                                <div class="absolute bottom-4 left-4 font-mono text-[10px] text-cyber-blue/70">
+                                    SYS.OPT: YOLOv8n_INT8<br>FPS: <span id="sys-fps" class="text-white">--</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Cam 2 + Telemetry -->
+                    <div class="lg:col-span-1 glass-panel p-1 flex flex-col">
+                        <div class="px-4 py-3 flex justify-between items-center bg-navy-900/50 border-b border-white/5">
+                            <h2
+                                class="font-display font-semibold text-sm text-slate-200 uppercase tracking-widest flex items-center gap-2">
+                                <i class="fa-solid fa-weight-scale text-slate-400"></i> Cam 02
+                            </h2>
+                            <span class="w-1.5 h-1.5 rounded-full bg-cyber-blue animate-pulse-glow"></span>
+                        </div>
+                        <div class="video-container flex-1 min-h-[200px]">
+                            <div class="cam-offline">
+                                <i class="fa-solid fa-scale-unbalanced"></i>
+                                <div class="status-text">Scale Cam · Awaiting Edge Server</div>
+                                <div class="conn-indicator">
+                                    <div class="conn-dot"></div>
+                                    <div class="conn-dot"></div>
+                                    <div class="conn-dot"></div>
+                                </div>
+                            </div>
+                            <div class="cam-overlay">
+                                <div
+                                    class="absolute top-3 left-3 px-2 py-0.5 bg-black/50 border border-white/10 text-[9px] font-mono text-white rounded">
+                                    SCALE_VIEW</div>
+                            </div>
+                        </div>
+
+                        <!-- Telemetry -->
+                        <div
+                            class="p-4 bg-navy-900/30 border-t border-white/5 mt-1 flex flex-col justify-center gap-3 relative overflow-hidden min-h-[120px]">
+                            <div class="text-[10px] font-mono text-slate-500 uppercase tracking-widest mb-1">Engine
+                                Telemetry</div>
+                            <div class="flex justify-between items-end">
+                                <div class="text-xs text-slate-400">Operation Time</div>
+                                <div class="font-mono text-sm text-white" id="telemetry-time">00:00:00</div>
+                            </div>
+                            <div class="space-y-1">
+                                <div class="flex justify-between text-[10px] text-slate-400 font-mono">
+                                    <span>MEM.ALLOC</span><span id="mem-pct">34%</span>
+                                </div>
+                                <div class="w-full bg-navy-950 h-1.5 rounded-full overflow-hidden">
+                                    <div id="mem-bar"
+                                        class="bg-gradient-to-r from-cyber-blue to-purple-500 h-full rounded-full transition-all duration-1000"
+                                        style="width:34%"></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Right: Live Analysis -->
+            <div class="xl:col-span-4 flex flex-col gap-6">
+                <div class="glass-panel flex-1 p-6 relative flex flex-col border-t-4 transition-colors duration-500"
+                    id="analysis-panel" style="border-top-color:#334155">
+
+                    <div class="flex justify-between items-start mb-6">
+                        <div>
+                            <h2 class="text-lg font-display font-bold text-white flex items-center gap-2">
+                                <i class="fa-solid fa-radar text-cyber-blue animate-spin"
+                                    style="animation-duration:4s"></i> Live Analysis
+                            </h2>
+                            <p class="text-xs font-mono text-slate-400 mt-1" id="analysis-subtitle">AWAITING SUBJECT
+                                DETECTION</p>
+                        </div>
+                        <div id="state-badge"
+                            class="px-3 py-1 rounded-full border border-slate-600 bg-slate-800 text-xs font-bold text-slate-400 font-mono tracking-wider">
+                            STANDBY
+                        </div>
+                    </div>
+
+                    <div class="space-y-4 flex-1">
+                        <!-- Plate -->
+                        <div class="bg-navy-950/80 rounded-xl p-5 border border-white/5 relative overflow-hidden group">
+                            <div class="flex justify-between items-center mb-2">
+                                <span class="text-[10px] font-mono tracking-widest text-slate-400 uppercase">Recognized
+                                    Plate</span>
+                                <i class="fa-solid fa-id-card text-slate-600"></i>
+                            </div>
+                            <div
+                                class="h-16 flex items-center justify-center bg-navy-900 rounded-lg border border-slate-700 shadow-inner">
+                                <div id="livePlate"
+                                    class="text-3xl sm:text-4xl font-mono font-bold text-slate-500 tracking-[0.2em] transition-colors duration-300">
+                                    ----</div>
+                            </div>
+                            <div class="absolute bottom-0 left-0 w-full h-0.5 bg-slate-700" id="plate-highlight"></div>
+                        </div>
+
+                        <!-- Weight -->
+                        <div class="bg-navy-950/80 rounded-xl p-5 border border-white/5 relative overflow-hidden">
+                            <div class="flex justify-between items-center mb-2">
+                                <span class="text-[10px] font-mono tracking-widest text-slate-400 uppercase">Sensor
+                                    Reading</span>
+                                <i class="fa-solid fa-scale-unbalanced text-slate-600"></i>
+                            </div>
+                            <div class="flex items-baseline justify-end gap-2 mt-2">
+                                <div id="liveWeight"
+                                    class="text-5xl sm:text-6xl font-display font-bold text-slate-600 tracking-tighter transition-all duration-300 tabular-nums">
+                                    0000</div>
+                                <div class="text-lg font-mono font-bold text-slate-500 mb-1">KG</div>
+                            </div>
+                        </div>
+
+                        <!-- Stats Grid -->
+                        <div class="grid grid-cols-2 gap-4">
+                            <div class="bg-navy-950/50 rounded-lg p-4 border border-white/5 text-center">
+                                <div class="text-[10px] font-mono text-slate-500 mb-1">DWELL TIME</div>
+                                <div id="liveDuration" class="text-xl font-mono text-white tabular-nums">0.0s</div>
+                            </div>
+                            <div class="bg-navy-950/50 rounded-lg p-4 border border-white/5 text-center">
+                                <div class="text-[10px] font-mono text-slate-500 mb-1">CONFIDENCE</div>
+                                <div id="liveConf" class="text-xl font-mono text-white tabular-nums">--%</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Cycle bar -->
+                    <div class="mt-6">
+                        <div class="flex justify-between text-[10px] font-mono mb-1.5 text-slate-500">
+                            <span>OP.CYCLE.PROGRESS</span><span id="cycle-pct">0%</span>
+                        </div>
+                        <div class="w-full bg-navy-950 h-1.5 rounded-full overflow-hidden">
+                            <div id="cycle-bar" class="bg-slate-700 h-full rounded-full transition-all duration-500"
+                                style="width:0%"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Registration Log -->
+            <div class="xl:col-span-12 glass-panel p-1 flex flex-col mb-8">
+                <div class="px-6 py-4 flex justify-between items-center border-b border-white/10 bg-navy-950/30">
+                    <h2 class="text-lg font-display font-bold text-white flex items-center gap-2">
+                        <i class="fa-solid fa-database text-cyber-blue"></i> Registration Log
+                    </h2>
+                    <button onclick="runDemo()"
+                        class="px-3 py-1.5 bg-white/5 hover:bg-white/10 border border-cyber-blue/20 rounded-lg text-xs font-mono text-cyber-blue hover:text-white transition-all flex items-center gap-2">
+                        <i class="fa-solid fa-play"></i> RUN DEMO CYCLE
+                    </button>
+                </div>
+                <div class="overflow-x-auto">
+                    <table class="w-full text-left border-collapse">
+                        <thead>
+                            <tr class="bg-navy-900/60 border-b border-white/10 text-xs font-mono text-slate-400">
+                                <th class="px-6 py-3 font-semibold tracking-wider">TIMESTAMP</th>
+                                <th class="px-6 py-3 font-semibold tracking-wider">VEHICLE ID (PLATE)</th>
+                                <th class="px-6 py-3 font-semibold tracking-wider text-right">REGISTERED WEIGHT</th>
+                                <th class="px-6 py-3 font-semibold tracking-wider text-right">DWELL</th>
+                                <th class="px-6 py-3 font-semibold tracking-wider text-center">STATUS</th>
+                            </tr>
+                        </thead>
+                        <tbody id="historyTableBody" class="divide-y divide-white/5 text-sm bg-navy-950/20">
+                            <tr>
+                                <td colspan="5" class="px-6 py-12 text-center text-slate-500 font-mono text-xs">NO LOGS
+                                    YET — CLICK "RUN DEMO CYCLE" TO SIMULATE</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // ---------- CLOCK + FPS ----------
+        const startTime = Date.now();
+        let fakeFps = 24.5, memUsage = 34;
+
+        setInterval(() => {
+            const elapsed = Date.now() - startTime;
+            const h = String(Math.floor(elapsed / 3600000)).padStart(2, '0');
+            const m = String(Math.floor((elapsed % 3600000) / 60000)).padStart(2, '0');
+            const s = String(Math.floor((elapsed % 60000) / 1000)).padStart(2, '0');
+            document.getElementById('telemetry-time').innerText = `${h}:${m}:${s}`;
+            fakeFps = Math.max(22, Math.min(28, fakeFps + (Math.random() - .5) * 2));
+            document.getElementById('sys-fps').innerText = fakeFps.toFixed(1);
+            memUsage = Math.max(28, Math.min(52, memUsage + (Math.random() - .5) * 2));
+            document.getElementById('mem-bar').style.width = memUsage.toFixed(0) + '%';
+            document.getElementById('mem-pct').innerText = memUsage.toFixed(0) + '%';
+        }, 300);
+
+        // ---------- DEMO SIMULATION ----------
+        const demoPlates = ['RJ14CB5278', 'MH12DE4528', 'DL3CAM6710', 'GJ05GH3311', 'UP32BT9921'];
+        const demoWeights = [24500, 18200, 31000, 27800, 19600];
+        let demoIndex = 0;
+        let demoRunning = false;
+
+        function fmtDate(d) {
+            const t = d.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+            const ds = d.toLocaleDateString('en-US', { month: 'short', day: '2-digit' });
+            return `<span class="text-slate-500 mr-2">${ds}</span><span class="text-white">${t}</span>`;
+        }
+
+        function addTableRow(plate, weight, dwell) {
+            const tbody = document.getElementById('historyTableBody');
+            // Remove placeholder
+            if (tbody.querySelector('td[colspan]')) tbody.innerHTML = '';
+
+            const row = document.createElement('tr');
+            row.className = 'hover:bg-navy-900/50 transition-colors new-row bg-cyber-green/5';
+            row.innerHTML = `
+                <td class="px-6 py-4 whitespace-nowrap text-xs font-mono">${fmtDate(new Date())}</td>
+                <td class="px-6 py-4"><div class="inline-flex items-center px-2.5 py-1 rounded bg-amber-900/30 border border-amber-500/20 text-cyber-amber font-mono font-bold tracking-wider">${plate}</div></td>
+                <td class="px-6 py-4 text-right font-mono font-bold text-cyber-green">${weight.toLocaleString()} kg</td>
+                <td class="px-6 py-4 text-right font-mono text-slate-300">${dwell}s</td>
+                <td class="px-6 py-4 text-center"><span class="px-2 py-0.5 rounded text-[10px] font-bold font-mono tracking-widest bg-cyber-blue/10 text-cyber-blue border border-cyber-blue/20">LOGGED</span></td>
+            `;
+            tbody.insertBefore(row, tbody.firstChild);
+            setTimeout(() => row.classList.remove('new-row', 'bg-cyber-green/5'), 1000);
+        }
+
+        async function runDemo() {
+            if (demoRunning) return;
+            demoRunning = true;
+
+            const plate = demoPlates[demoIndex % demoPlates.length];
+            const weight = demoWeights[demoIndex % demoWeights.length];
+            demoIndex++;
+
+            const panel = document.getElementById('analysis-panel');
+            const badge = document.getElementById('state-badge');
+            const elPlate = document.getElementById('livePlate');
+            const elWt = document.getElementById('liveWeight');
+            const elDur = document.getElementById('liveDuration');
+            const elConf = document.getElementById('liveConf');
+            const cycleBar = document.getElementById('cycle-bar');
+            const cyclePct = document.getElementById('cycle-pct');
+            const cam1badge = document.getElementById('cam1-badge');
+            const container = document.getElementById('cam1-container');
+            const subtitle = document.getElementById('analysis-subtitle');
+
+            // Phase 1: Truck Detected
+            panel.style.borderTopColor = '#ffb300';
+            badge.textContent = 'PROCESSING';
+            badge.className = 'px-3 py-1 rounded-full border border-cyber-amber/50 bg-cyber-amber/10 text-xs font-bold text-cyber-amber font-mono tracking-wider';
+            cam1badge.innerHTML = '<span class="w-1.5 h-1.5 rounded-full bg-cyber-amber animate-pulse"></span> DETECTING';
+            cam1badge.className = 'flex items-center gap-1.5 text-[10px] font-bold font-mono px-2 py-1 rounded bg-amber-900/40 text-cyber-amber border border-amber-500/30';
+            subtitle.innerText = 'VEHICLE DETECTED — READING PLATE';
+            elPlate.innerText = '[SCANNING]';
+            cycleBar.style.width = '20%';
+            cycleBar.className = 'bg-slate-700 h-full rounded-full transition-all duration-500';
+            cyclePct.innerText = '20%';
+            elDur.innerText = '0.0s';
+            let dwell = 0, dwellTimer = setInterval(() => { dwell += .1; elDur.innerText = dwell.toFixed(1) + 's'; }, 100);
+
+            await sleep(1800);
+
+            // Phase 2: Plate locked
+            elPlate.innerText = plate;
+            elPlate.className = 'text-3xl sm:text-4xl font-mono font-bold text-cyber-amber tracking-[0.2em] transition-colors duration-300 text-glow-amber';
+            elConf.innerText = '94%';
+            cycleBar.style.width = '50%';
+            cyclePct.innerText = '50%';
+            subtitle.innerText = 'PLATE LOCKED — READING SCALE';
+
+            // Animate weight counting up
+            let displayed = 0;
+            const step = Math.ceil(weight / 30);
+            for (let i = 0; i < 30; i++) {
+                displayed = Math.min(weight, displayed + step);
+                elWt.innerText = displayed.toLocaleString().replace(/,/g, '');
+                elWt.className = 'text-5xl sm:text-6xl font-display font-bold text-cyber-amber tracking-tighter transition-all duration-300 tabular-nums text-glow-amber';
+                await sleep(60);
+            }
+            await sleep(800);
+            elWt.innerText = weight.toString();
+            elWt.className = 'text-5xl sm:text-6xl font-display font-bold text-cyber-green tracking-tighter transition-all duration-300 tabular-nums text-glow-green';
+
+            // Phase 3: Weight locked
+            panel.style.borderTopColor = '#00ff66';
+            badge.textContent = 'WEIGHT LOCKED';
+            badge.className = 'px-3 py-1 rounded-full border border-cyber-green/50 bg-cyber-green/10 text-xs font-bold text-cyber-green font-mono tracking-wider';
+            subtitle.innerText = 'RECORD CONFIRMED — LOGGING';
+            cycleBar.style.width = '90%';
+            cycleBar.className = 'bg-cyber-green h-full rounded-full transition-all duration-500';
+            cyclePct.innerText = '90%';
+            await sleep(1200);
+
+            // Phase 4: Complete — reset
+            clearInterval(dwellTimer);
+            const finalDwell = dwell.toFixed(1);
+            addTableRow(plate, weight, finalDwell);
+
+            cycleBar.style.width = '100%';
+            cycleBar.className = 'bg-cyber-blue h-full rounded-full transition-all duration-300';
+            await sleep(400);
+
+            panel.style.borderTopColor = '#334155';
+            badge.textContent = 'STANDBY';
+            badge.className = 'px-3 py-1 rounded-full border border-slate-600 bg-slate-800 text-xs font-bold text-slate-400 font-mono tracking-wider';
+            cam1badge.innerHTML = '<span class="w-1.5 h-1.5 rounded-full bg-slate-500"></span> IDLE';
+            cam1badge.className = 'flex items-center gap-1.5 text-[10px] font-bold font-mono px-2 py-1 rounded bg-slate-800/80 text-slate-400 border border-slate-700';
+            subtitle.innerText = 'AWAITING SUBJECT DETECTION';
+            elPlate.innerText = '----';
+            elPlate.className = 'text-3xl sm:text-4xl font-mono font-bold text-slate-500 tracking-[0.2em] transition-colors duration-300';
+            elWt.innerText = '0000';
+            elWt.className = 'text-5xl sm:text-6xl font-display font-bold text-slate-600 tracking-tighter transition-all duration-300 tabular-nums';
+            elConf.innerText = '--%';
+            elDur.innerText = '0.0s';
+            cycleBar.style.width = '0%';
+            cycleBar.className = 'bg-slate-700 h-full rounded-full transition-all duration-500';
+            cyclePct.innerText = '0%';
+
+            demoRunning = false;
+        }
+
+        function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+    </script>
+</body>
+
+</html>
