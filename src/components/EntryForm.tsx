@@ -46,16 +46,18 @@ export default function EntryForm({ onAdd }: { onAdd: () => void }) {
     setError('');
     
     try {
-      // 1. Upload Images to Supabase
+      // 1. Upload Images to Supabase in parallel
       const ts = Date.now();
       const filename1 = `${ts}_1_${image1!.name}`;
       const filename2 = `${ts}_2_${image2!.name}`;
       
-      const { data: upload1, error: err1 } = await supabase.storage.from('truck-images').upload(filename1, image1!);
-      if (err1) throw new Error('Failed to upload image 1: ' + err1.message);
-      
-      const { data: upload2, error: err2 } = await supabase.storage.from('truck-images').upload(filename2, image2!);
-      if (err2) throw new Error('Failed to upload image 2: ' + err2.message);
+      const uploadPromise1 = supabase.storage.from('truck-images').upload(filename1, image1!);
+      const uploadPromise2 = supabase.storage.from('truck-images').upload(filename2, image2!);
+
+      const [res1, res2] = await Promise.all([uploadPromise1, uploadPromise2]);
+
+      if (res1.error) throw new Error('Failed to upload image 1: ' + res1.error.message);
+      if (res2.error) throw new Error('Failed to upload image 2: ' + res2.error.message);
 
       const url1 = supabase.storage.from('truck-images').getPublicUrl(filename1).data.publicUrl;
       const url2 = supabase.storage.from('truck-images').getPublicUrl(filename2).data.publicUrl;
