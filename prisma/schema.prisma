@@ -1,0 +1,17 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model Entry {
+  id          String   @id @default(uuid())
+  truckNumber String
+  weight      Float
+  personName  String
+  image1Url   String
+  image2Url   String
+  createdAt   DateTime @default(now())
+}
